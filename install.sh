@@ -106,13 +106,24 @@ ExecStart=$APP_DIR/self-assist
 WorkingDirectory=$DATA_DIR
 Restart=on-failure
 RestartSec=5
+# A missing LLM key makes the app exit 78 (EX_CONFIG). Don't crash-loop on a
+# configuration error — stop and wait for the operator to set it.
+RestartPreventExitStatus=78
 
 [Install]
 WantedBy=default.target
 UNIT
   systemctl --user daemon-reload
-  systemctl --user enable --now "$SERVICE_NAME"
-  say "Registered and started the systemd user service '$SERVICE_NAME'."
+  systemctl --user enable "$SERVICE_NAME"
+  if [ "$first_install" = 1 ]; then
+    # Start it now: with no key it comes up in first-run SETUP MODE, serving a browser
+    # setup page at http://localhost:5080 so you can finish setup without editing files.
+    systemctl --user start "$SERVICE_NAME"
+    say "Started the systemd user service '$SERVICE_NAME' in first-run setup mode."
+  else
+    systemctl --user restart "$SERVICE_NAME"
+    say "Restarted the systemd user service '$SERVICE_NAME'."
+  fi
   say "Logs: journalctl --user -u $SERVICE_NAME -f   (and $DATA_DIR/logs/)"
   if command -v loginctl >/dev/null && [ "$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null)" != "yes" ]; then
     say "Tip: 'loginctl enable-linger $USER' keeps it running after you log out."
@@ -136,8 +147,15 @@ elif [ "$os" = "Darwin" ]; then
 </plist>
 PLIST
   mkdir -p "$DATA_DIR/logs"
-  launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || launchctl load "$plist"
-  say "Registered and started the launchd agent 'com.selfassist.agent'."
+  if [ "$first_install" = 1 ]; then
+    # Load it now: with no key it comes up in first-run SETUP MODE, serving a browser
+    # setup page at http://localhost:5080 so you can finish setup without editing files.
+    launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || launchctl load "$plist"
+    say "Registered and started the launchd agent 'com.selfassist.agent' in first-run setup mode."
+  else
+    launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || launchctl load "$plist"
+    say "Registered and started the launchd agent 'com.selfassist.agent'."
+  fi
   say "Logs: $DATA_DIR/logs/"
 else
   say "No supported service manager found — run it manually:"
@@ -147,14 +165,20 @@ fi
 # --- Done ---------------------------------------------------------------------
 echo
 if [ "$first_install" = 1 ]; then
-  say "Installed. One step left:"
-  echo "    1. Edit $DATA_DIR/.env  (set ANTHROPIC_API_KEY, or Llm__Provider=Local)"
-  if [ "$os" = "Linux" ]; then
-    echo "    2. systemctl --user restart $SERVICE_NAME"
-  else
-    echo "    2. launchctl kickstart -k gui/$(id -u)/com.selfassist.agent"
+  say "Installed. Finish setup in your browser:"
+  echo
+  echo "        http://localhost:5080"
+  echo
+  echo "    Pick a provider and paste your key — it's saved to"
+  echo "        $DATA_DIR/.env"
+  echo "    and the agent restarts into normal mode automatically."
+  echo "    Prefer the terminal? Run:  self-assist setup"
+  if ! { [ "$os" = "Linux" ] && command -v systemctl >/dev/null; } && [ "$os" != "Darwin" ]; then
+    echo
+    echo "    No service manager was found — start it first with:"
+    echo "        cd $DATA_DIR && $APP_DIR/self-assist"
   fi
-  echo "    3. Open http://localhost:5080"
+  echo
 else
   say "Upgraded to $version. Your data in $DATA_DIR was kept."
   say "Open http://localhost:5080"

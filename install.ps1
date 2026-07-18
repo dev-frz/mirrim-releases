@@ -65,16 +65,27 @@ $settings = New-ScheduledTaskSettingsSet `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-Start-ScheduledTask -TaskName $TaskName
-Say "Registered and started the scheduled task '$TaskName' (runs at logon)."
+if ($firstInstall) {
+    # Start it now: with no key it comes up in first-run SETUP MODE, serving a browser
+    # setup page at http://localhost:5080 so you can finish setup without editing files.
+    Start-ScheduledTask -TaskName $TaskName
+    Say "Registered and started the scheduled task '$TaskName' in first-run setup mode."
+} else {
+    Start-ScheduledTask -TaskName $TaskName
+    Say "Registered and started the scheduled task '$TaskName' (runs at logon)."
+}
 
 # --- Done -----------------------------------------------------------------------
 Write-Host ""
 if ($firstInstall) {
-    Say "Installed. One step left:"
-    Write-Host "    1. Edit $envFile  (set ANTHROPIC_API_KEY, or Llm__Provider=Local)"
-    Write-Host "    2. Stop-ScheduledTask -TaskName $TaskName; Start-ScheduledTask -TaskName $TaskName"
-    Write-Host "    3. Open http://localhost:5080"
+    Say "Installed. Finish setup in your browser:"
+    Write-Host ""
+    Write-Host "        http://localhost:5080"
+    Write-Host ""
+    Write-Host "    Pick a provider and paste your key — it's saved to $envFile"
+    Write-Host "    and the agent restarts into normal mode automatically."
+    Write-Host "    Prefer the terminal? Run:  self-assist setup"
+    Write-Host ""
 } else {
     Say "Upgraded to $version. Your data in $DataDir was kept."
     Say "Open http://localhost:5080"
