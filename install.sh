@@ -84,6 +84,16 @@ mkdir -p "$APP_DIR" "$DATA_DIR"
 tar -xzf "$tmp/$asset" -C "$APP_DIR"
 chmod +x "$APP_DIR/self-assist"
 
+# Put `self-assist` on PATH via a symlink in a per-user bin dir, so the CLI works
+# by name (matching the docs) without the operator editing PATH themselves.
+BIN_DIR="$HOME/.local/bin"
+mkdir -p "$BIN_DIR"
+ln -sf "$APP_DIR/self-assist" "$BIN_DIR/self-assist"
+case ":$PATH:" in
+  *":$BIN_DIR:"*) on_path=1 ;;
+  *)              on_path=0 ;;
+esac
+
 # First install: seed the data directory with the .env template.
 if [ ! -f "$DATA_DIR/.env" ]; then
   cp "$APP_DIR/.env.example" "$DATA_DIR/.env"
@@ -163,6 +173,13 @@ else
 fi
 
 # --- Done ---------------------------------------------------------------------
+echo
+say "Linked the CLI: $BIN_DIR/self-assist -> $APP_DIR/self-assist"
+if [ "$on_path" = 0 ]; then
+  say "$BIN_DIR is not on your PATH. Add it (then open a new shell):"
+  echo "        echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.profile"
+  echo "    Until then, run the CLI by full path: $BIN_DIR/self-assist"
+fi
 echo
 if [ "$first_install" = 1 ]; then
   say "Installed. Finish setup in your browser:"

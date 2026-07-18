@@ -53,6 +53,19 @@ New-Item -ItemType Directory -Force -Path $AppDir, $DataDir | Out-Null
 Expand-Archive -Path $zip -DestinationPath $AppDir -Force
 Remove-Item -Recurse -Force $tmp
 
+# Put `self-assist` on PATH (user scope) so the CLI works by name — matching the docs —
+# without the user editing PATH themselves. Idempotent across re-runs/upgrades.
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if (-not (($userPath -split ';') -contains $AppDir)) {
+    $newPath = if ([string]::IsNullOrEmpty($userPath)) { $AppDir } else { "$userPath;$AppDir" }
+    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+    Say "Added $AppDir to your user PATH (open a new terminal to use 'self-assist')."
+} else {
+    Say "$AppDir is already on your user PATH."
+}
+# Make it usable in this session too, so the steps printed below work right away.
+if (-not (($env:Path -split ';') -contains $AppDir)) { $env:Path = "$env:Path;$AppDir" }
+
 # First install: seed the data directory with the .env template.
 $envFile = Join-Path $DataDir ".env"
 $firstInstall = -not (Test-Path $envFile)
