@@ -172,6 +172,19 @@ else
   say "  cd $DATA_DIR && $APP_DIR/self-assist"
 fi
 
+# Headless/remote host? No local browser to open the setup page. Treat an SSH
+# session, or a Linux box with no display server, as headless and lead with the
+# terminal wizard instead of a localhost URL the operator can't reach.
+if [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_TTY:-}" ] \
+   || { [ "$os" = "Linux" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; }; then
+  headless=1
+else
+  headless=0
+fi
+
+# The CLI name works only once BIN_DIR is on PATH; otherwise show the full path.
+if [ "$on_path" = 1 ]; then cli="self-assist"; else cli="$BIN_DIR/self-assist"; fi
+
 # --- Done ---------------------------------------------------------------------
 echo
 say "Linked the CLI: $BIN_DIR/self-assist -> $APP_DIR/self-assist"
@@ -181,7 +194,22 @@ if [ "$on_path" = 0 ]; then
   echo "    Until then, run the CLI by full path: $BIN_DIR/self-assist"
 fi
 echo
-if [ "$first_install" = 1 ]; then
+if [ "$first_install" = 1 ] && [ "$headless" = 1 ]; then
+  say "Installed on a headless/remote host. Finish setup in the terminal:"
+  echo
+  echo "        $cli setup"
+  echo
+  echo "    It prompts for a provider + key, writes $DATA_DIR/.env, and starts the agent."
+  echo "    Prefer a browser? The setup page is loopback-only for safety — forward the port:"
+  echo "        ssh -L 5080:localhost:5080 $USER@<this-host>"
+  echo "    then open http://localhost:5080 on your machine."
+  if ! { [ "$os" = "Linux" ] && command -v systemctl >/dev/null; } && [ "$os" != "Darwin" ]; then
+    echo
+    echo "    No service manager was found — start it first with:"
+    echo "        cd $DATA_DIR && $APP_DIR/self-assist"
+  fi
+  echo
+elif [ "$first_install" = 1 ]; then
   say "Installed. Finish setup in your browser:"
   echo
   echo "        http://localhost:5080"
@@ -189,7 +217,7 @@ if [ "$first_install" = 1 ]; then
   echo "    Pick a provider and paste your key — it's saved to"
   echo "        $DATA_DIR/.env"
   echo "    and the agent restarts into normal mode automatically."
-  echo "    Prefer the terminal? Run:  self-assist setup"
+  echo "    Prefer the terminal? Run:  $cli setup"
   if ! { [ "$os" = "Linux" ] && command -v systemctl >/dev/null; } && [ "$os" != "Darwin" ]; then
     echo
     echo "    No service manager was found — start it first with:"

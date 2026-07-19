@@ -97,7 +97,9 @@ if ($firstInstall) {
     Write-Host ""
     Write-Host "    Pick a provider and paste your key — it's saved to $envFile"
     Write-Host "    and the agent restarts into normal mode automatically."
-    Write-Host "    Prefer the terminal? Run:  self-assist setup"
+    Write-Host "    Prefer the terminal (or a headless/Server Core host)? Run:  self-assist setup"
+    Write-Host "    Remote box with no local browser? Forward the port from your machine:"
+    Write-Host "        ssh -L 5080:localhost:5080 <user>@<this-host>   # then open http://localhost:5080"
     Write-Host ""
 } else {
     Say "Upgraded to $version. Your data in $DataDir was kept."
