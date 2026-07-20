@@ -1,26 +1,27 @@
 #!/usr/bin/env bash
-# self-assist installer (Linux + macOS): downloads the latest self-contained
+# otto installer (Linux + macOS): downloads the latest self-contained
 # release (no .NET required), installs it per-user, and registers a managed
 # 24/7 service (systemd --user on Linux, launchd LaunchAgent on macOS).
 #
-#   curl -fsSL https://raw.githubusercontent.com/ferozhussain/self-assist-releases/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ferozhussain/otto-releases/main/install.sh | bash
 #
 # This is the public release channel — no token is needed to install. You can
 # optionally export GITHUB_TOKEN to avoid GitHub's unauthenticated API rate
 # limit when looking up the latest release:
 #
 #   export GITHUB_TOKEN=ghp_...
-#   curl -fsSL https://raw.githubusercontent.com/ferozhussain/self-assist-releases/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ferozhussain/otto-releases/main/install.sh | bash
 #
 # Re-running upgrades the binary in place and keeps your data (.env, agent.db).
-# Pin a version with SELF_ASSIST_VERSION=v1.2.3.
+# Pin a version with OTTO_VERSION=v1.2.3.
 set -euo pipefail
 
-REPO="ferozhussain/self-assist-releases"
-ROOT="${SELF_ASSIST_HOME:-$HOME/.local/share/self-assist}"
+REPO="ferozhussain/otto-releases"
+# OTTO_HOME wins; SELF_ASSIST_HOME is honored as the legacy (pre-rebrand) name.
+ROOT="${OTTO_HOME:-${SELF_ASSIST_HOME:-$HOME/.local/share/otto}}"
 APP_DIR="$ROOT/app"
 DATA_DIR="$ROOT/data"
-SERVICE_NAME="self-assist"
+SERVICE_NAME="otto"
 TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -50,17 +51,45 @@ case "$os/$arch" in
   *) fail "unsupported platform: $os/$arch (supported: Linux/macOS on x64/arm64)" ;;
 esac
 
-version="${SELF_ASSIST_VERSION:-}"
+# --- Migrate a legacy self-assist install (pre-rebrand) ----------------------
+# The product was renamed self-assist → otto. If the old install is present (and
+# we're not deliberately reusing its root via SELF_ASSIST_HOME), retire its
+# service, carry the data (.env, agent.db) over, and clean up the old artifacts.
+OLD_ROOT="$HOME/.local/share/self-assist"
+if [ "$ROOT" != "$OLD_ROOT" ] && [ -d "$OLD_ROOT" ]; then
+  say "Found a legacy self-assist install — migrating it to otto..."
+  if [ "$os" = "Linux" ] && command -v systemctl >/dev/null; then
+    systemctl --user stop self-assist 2>/dev/null || true
+    systemctl --user disable self-assist 2>/dev/null || true
+    rm -f "$HOME/.config/systemd/user/self-assist.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+  elif [ "$os" = "Darwin" ]; then
+    launchctl bootout "gui/$(id -u)/com.selfassist.agent" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/com.selfassist.agent.plist"
+  fi
+  if [ -d "$OLD_ROOT/data" ] && [ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then
+    rm -rf "$DATA_DIR"
+    mkdir -p "$ROOT"
+    mv "$OLD_ROOT/data" "$DATA_DIR"
+    say "Moved your data (.env, agent.db) to $DATA_DIR."
+  fi
+  rm -rf "$OLD_ROOT/app"
+  rm -f "$HOME/.local/bin/self-assist"
+  rmdir "$OLD_ROOT" 2>/dev/null || true
+  say "Legacy self-assist service and app removed."
+fi
+
+version="${OTTO_VERSION:-${SELF_ASSIST_VERSION:-}}"
 if [ -z "$version" ]; then
   say "Looking up the latest release..."
   version=$(gh_curl "https://api.github.com/repos/$REPO/releases/latest" |
     grep -m1 '"tag_name"' | cut -d'"' -f4) || true
   if [ -z "$version" ]; then
-    fail "could not determine the latest release. Are releases published yet? (Pin one with SELF_ASSIST_VERSION=vX.Y.Z, or check https://github.com/$REPO/releases)"
+    fail "could not determine the latest release. Are releases published yet? (Pin one with OTTO_VERSION=vX.Y.Z, or check https://github.com/$REPO/releases)"
   fi
 fi
 
-asset="self-assist-$version-$rid.tar.gz"
+asset="otto-$version-$rid.tar.gz"
 
 # --- Download and install ----------------------------------------------------
 tmp=$(mktemp -d)
@@ -75,20 +104,20 @@ curl -fsSL -o "$tmp/$asset" "$url" ||
 if [ "$os" = "Linux" ] && command -v systemctl >/dev/null; then
   systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
 elif [ "$os" = "Darwin" ]; then
-  launchctl bootout "gui/$(id -u)/com.selfassist.agent" 2>/dev/null || true
+  launchctl bootout "gui/$(id -u)/com.ottoagent.otto" 2>/dev/null || true
 fi
 
 say "Installing to $APP_DIR ..."
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR" "$DATA_DIR"
 tar -xzf "$tmp/$asset" -C "$APP_DIR"
-chmod +x "$APP_DIR/self-assist"
+chmod +x "$APP_DIR/otto"
 
-# Put `self-assist` on PATH via a symlink in a per-user bin dir, so the CLI works
+# Put `otto` on PATH via a symlink in a per-user bin dir, so the CLI works
 # by name (matching the docs) without the operator editing PATH themselves.
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
-ln -sf "$APP_DIR/self-assist" "$BIN_DIR/self-assist"
+ln -sf "$APP_DIR/otto" "$BIN_DIR/otto"
 case ":$PATH:" in
   *":$BIN_DIR:"*) on_path=1 ;;
   *)              on_path=0 ;;
@@ -107,12 +136,12 @@ if [ "$os" = "Linux" ] && command -v systemctl >/dev/null; then
   mkdir -p "$HOME/.config/systemd/user"
   cat > "$HOME/.config/systemd/user/$SERVICE_NAME.service" <<UNIT
 [Unit]
-Description=self-assist personal AI agent
+Description=otto personal AI agent
 After=network-online.target
 
 [Service]
 Type=notify
-ExecStart=$APP_DIR/self-assist
+ExecStart=$APP_DIR/otto
 WorkingDirectory=$DATA_DIR
 Restart=on-failure
 RestartSec=5
@@ -139,15 +168,15 @@ UNIT
     say "Tip: 'loginctl enable-linger $USER' keeps it running after you log out."
   fi
 elif [ "$os" = "Darwin" ]; then
-  plist="$HOME/Library/LaunchAgents/com.selfassist.agent.plist"
+  plist="$HOME/Library/LaunchAgents/com.ottoagent.otto.plist"
   mkdir -p "$HOME/Library/LaunchAgents"
   cat > "$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.selfassist.agent</string>
-  <key>ProgramArguments</key><array><string>$APP_DIR/self-assist</string></array>
+  <key>Label</key><string>com.ottoagent.otto</string>
+  <key>ProgramArguments</key><array><string>$APP_DIR/otto</string></array>
   <key>WorkingDirectory</key><string>$DATA_DIR</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
@@ -161,15 +190,15 @@ PLIST
     # Load it now: with no key it comes up in first-run SETUP MODE, serving a browser
     # setup page at http://localhost:5080 so you can finish setup without editing files.
     launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || launchctl load "$plist"
-    say "Registered and started the launchd agent 'com.selfassist.agent' in first-run setup mode."
+    say "Registered and started the launchd agent 'com.ottoagent.otto' in first-run setup mode."
   else
     launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || launchctl load "$plist"
-    say "Registered and started the launchd agent 'com.selfassist.agent'."
+    say "Registered and started the launchd agent 'com.ottoagent.otto'."
   fi
   say "Logs: $DATA_DIR/logs/"
 else
   say "No supported service manager found — run it manually:"
-  say "  cd $DATA_DIR && $APP_DIR/self-assist"
+  say "  cd $DATA_DIR && $APP_DIR/otto"
 fi
 
 # Headless/remote host? No local browser to open the setup page. Treat an SSH
@@ -183,15 +212,15 @@ else
 fi
 
 # The CLI name works only once BIN_DIR is on PATH; otherwise show the full path.
-if [ "$on_path" = 1 ]; then cli="self-assist"; else cli="$BIN_DIR/self-assist"; fi
+if [ "$on_path" = 1 ]; then cli="otto"; else cli="$BIN_DIR/otto"; fi
 
 # --- Done ---------------------------------------------------------------------
 echo
-say "Linked the CLI: $BIN_DIR/self-assist -> $APP_DIR/self-assist"
+say "Linked the CLI: $BIN_DIR/otto -> $APP_DIR/otto"
 if [ "$on_path" = 0 ]; then
   say "$BIN_DIR is not on your PATH. Add it (then open a new shell):"
   echo "        echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.profile"
-  echo "    Until then, run the CLI by full path: $BIN_DIR/self-assist"
+  echo "    Until then, run the CLI by full path: $BIN_DIR/otto"
 fi
 echo
 if [ "$first_install" = 1 ] && [ "$headless" = 1 ]; then
@@ -206,7 +235,7 @@ if [ "$first_install" = 1 ] && [ "$headless" = 1 ]; then
   if ! { [ "$os" = "Linux" ] && command -v systemctl >/dev/null; } && [ "$os" != "Darwin" ]; then
     echo
     echo "    No service manager was found — start it first with:"
-    echo "        cd $DATA_DIR && $APP_DIR/self-assist"
+    echo "        cd $DATA_DIR && $APP_DIR/otto"
   fi
   echo
 elif [ "$first_install" = 1 ]; then
@@ -221,7 +250,7 @@ elif [ "$first_install" = 1 ]; then
   if ! { [ "$os" = "Linux" ] && command -v systemctl >/dev/null; } && [ "$os" != "Darwin" ]; then
     echo
     echo "    No service manager was found — start it first with:"
-    echo "        cd $DATA_DIR && $APP_DIR/self-assist"
+    echo "        cd $DATA_DIR && $APP_DIR/otto"
   fi
   echo
 else
