@@ -163,9 +163,19 @@ UNIT
     systemctl --user restart "$SERVICE_NAME"
     say "Restarted the systemd user service '$SERVICE_NAME'."
   fi
-  say "Logs: journalctl --user -u $SERVICE_NAME -f   (and $DATA_DIR/logs/)"
+  say "Logs: journalctl --user -u $SERVICE_NAME -f   (and $DATA_DIR/logs/, or 'otto logs')"
+  # A systemd *user* service only starts at boot when lingering is enabled for this
+  # account — without it, otto stays down after a reboot until someone logs in.
+  # Enabling your own linger is allowed without root on most distros; fall back to
+  # an explicit instruction where policy forbids it.
   if command -v loginctl >/dev/null && [ "$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null)" != "yes" ]; then
-    say "Tip: 'loginctl enable-linger $USER' keeps it running after you log out."
+    loginctl enable-linger "$USER" 2>/dev/null || true
+    if [ "$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null)" = "yes" ]; then
+      say "Enabled lingering: otto now starts at boot and keeps running after you log out."
+    else
+      say "IMPORTANT: could not enable lingering — after a reboot otto stays down until you log in."
+      say "Fix it once with:  sudo loginctl enable-linger $USER"
+    fi
   fi
 elif [ "$os" = "Darwin" ]; then
   plist="$HOME/Library/LaunchAgents/com.ottoagent.otto.plist"
