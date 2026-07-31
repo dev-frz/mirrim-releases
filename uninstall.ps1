@@ -27,6 +27,17 @@ if ($task) {
 }
 Get-Process -Name "otto" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
+# --- Remove the firewall rule the installer may have added (needs elevation; best-effort)
+try {
+    $fw = Get-NetFirewallRule -DisplayName "otto web console" -ErrorAction SilentlyContinue
+    if ($fw) {
+        $fw | Remove-NetFirewallRule -ErrorAction Stop
+        Say "Removed the 'otto web console' firewall rule."
+    }
+} catch {
+    Warn "Could not remove the 'otto web console' firewall rule (needs an elevated PowerShell)."
+}
+
 # --- Remove the app dir from the user PATH ----------------------------------
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath) {

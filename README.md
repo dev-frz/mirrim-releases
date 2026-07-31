@@ -23,18 +23,19 @@ curl -fsSL https://raw.githubusercontent.com/ferozhussain/otto-releases/main/ins
 irm https://raw.githubusercontent.com/ferozhussain/otto-releases/main/install.ps1 | iex
 ```
 
-The installer downloads the right build for your OS/arch, installs it per-user,
-and registers a managed 24/7 service — `systemd --user` on Linux, a `launchd`
-LaunchAgent on macOS, a Scheduled Task on Windows. Re-running upgrades the binary
-in place and keeps your data (`.env`, `agent.db`).
+The installer downloads the right build for your OS/arch, verifies it against
+the release's `SHA256SUMS`, installs it per-user, and registers a managed 24/7
+service — `systemd --user` on Linux, a `launchd` LaunchAgent on macOS, and on
+Windows a **background** Scheduled Task (no terminal window; a watchdog trigger
+restarts it if it ever stops). On a first install it asks which port the web
+console should use (default 5080) and whether to expose the console to your
+local network (default no; a sign-in token is generated when you say yes).
+Re-running upgrades the binary in place and keeps your data and settings
+(`.env`, `agent.db`).
 
-After the first install, set your key and open the console:
-
-1. Edit the `.env` in your data directory (`~/.local/share/otto/data/.env`
-   on Linux/macOS, `%LOCALAPPDATA%\otto\data\.env` on Windows) — set
-   `ANTHROPIC_API_KEY`, or `Llm__Provider=Local` to use a local model.
-2. Restart the service.
-3. Open <http://localhost:5080>.
+After the first install, open <http://localhost:5080> (or your chosen port) and
+finish setup in the browser — pick a provider and paste your key. On a headless
+box run `otto setup` in the terminal instead.
 
 ## Uninstall
 
@@ -59,6 +60,10 @@ iwr https://raw.githubusercontent.com/ferozhussain/otto-releases/main/uninstall.
   `OTTO_VERSION=v1.2.3` (bash) or `$env:OTTO_VERSION = "v1.2.3"`
   (PowerShell) before running the installer.
 - **Custom install location** — `OTTO_HOME=/path` / `$env:OTTO_HOME`.
+- **Scripted answers** — preset the first-install questions with
+  `OTTO_PORT=5080` and `OTTO_EXPOSE_LAN=true|false` (bash) or
+  `$env:OTTO_PORT` / `$env:OTTO_EXPOSE_LAN` (PowerShell). These also work on
+  re-runs to change the settings of an existing install.
 - **API rate limits** — installing needs no token. Optionally set `GITHUB_TOKEN`
   to lift GitHub's unauthenticated API rate limit on the "latest release" lookup.
 
