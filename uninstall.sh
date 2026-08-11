@@ -3,8 +3,8 @@
 # the PATH symlink, and the installed binary. Your data (.env, agent.db) is KEPT
 # by default — pass --purge to delete the data directory too.
 #
-#   curl -fsSL https://raw.githubusercontent.com/ferozhussain/otto-releases/main/uninstall.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/ferozhussain/otto-releases/main/uninstall.sh | bash -s -- --purge
+#   curl -fsSL https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.sh | bash -s -- --purge
 #
 # Honors OTTO_HOME (same as the installer) to locate a non-default install.
 set -euo pipefail

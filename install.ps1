@@ -4,7 +4,7 @@
 # terminal window to accidentally close — and keeps it running (watchdog +
 # restart-on-failure, on battery power too).
 #
-#   irm https://raw.githubusercontent.com/ferozhussain/otto-releases/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/dev-frz/otto-releases/main/install.ps1 | iex
 #
 # On a first install it asks two questions (skipped on upgrades):
 #   - which port the web console should listen on          (default 5080)
@@ -24,7 +24,7 @@ $ErrorActionPreference = "Stop"
 # PS5's Invoke-WebRequest progress bar slows downloads dramatically; we print our own detail lines.
 $ProgressPreference = "SilentlyContinue"
 
-$Repo = "ferozhussain/otto-releases"
+$Repo = "dev-frz/otto-releases"
 $Token = if ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } elseif ($env:GH_TOKEN) { $env:GH_TOKEN } else { $null }
 $AuthHeaders = if ($Token) { @{ Authorization = "Bearer $Token" } } else { @{} }
 # OTTO_HOME wins; SELF_ASSIST_HOME is honored as the legacy (pre-rebrand) name.

@@ -2,9 +2,9 @@
 # PATH entry, and the installed binary. Your data (.env, agent.db) is KEPT by
 # default — pass -Purge to delete the data directory too.
 #
-#   irm https://raw.githubusercontent.com/ferozhussain/otto-releases/main/uninstall.ps1 | iex
+#   irm https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.ps1 | iex
 #   # to also delete data, download and run with the switch:
-#   #   iwr https://raw.githubusercontent.com/ferozhussain/otto-releases/main/uninstall.ps1 -OutFile uninstall.ps1; ./uninstall.ps1 -Purge
+#   #   iwr https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.ps1 -OutFile uninstall.ps1; ./uninstall.ps1 -Purge
 #
 # Honors $env:OTTO_HOME (same as the installer) for a non-default install.
 param([switch]$Purge)

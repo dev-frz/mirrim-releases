@@ -4,7 +4,7 @@
 # per-user, and registers a managed 24/7 service (systemd --user on Linux,
 # launchd LaunchAgent on macOS).
 #
-#   curl -fsSL https://raw.githubusercontent.com/ferozhussain/otto-releases/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dev-frz/otto-releases/main/install.sh | bash
 #
 # On a first install it asks two questions (skipped on upgrades):
 #   - which port the web console should listen on          (default 5080)
@@ -19,13 +19,13 @@
 # limit when looking up the latest release:
 #
 #   export GITHUB_TOKEN=ghp_...
-#   curl -fsSL https://raw.githubusercontent.com/ferozhussain/otto-releases/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dev-frz/otto-releases/main/install.sh | bash
 #
 # Re-running upgrades the binary in place and keeps your data (.env, agent.db).
 # Pin a version with OTTO_VERSION=v1.2.3.
 set -euo pipefail
 
-REPO="ferozhussain/otto-releases"
+REPO="dev-frz/otto-releases"
 # OTTO_HOME wins; SELF_ASSIST_HOME is honored as the legacy (pre-rebrand) name.
 ROOT="${OTTO_HOME:-${SELF_ASSIST_HOME:-$HOME/.local/share/otto}}"
 APP_DIR="$ROOT/app"
