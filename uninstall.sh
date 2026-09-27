@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
-# otto uninstaller (Linux + macOS): stops and removes the managed service,
+# mirrim uninstaller (Linux + macOS): stops and removes the managed service,
 # the PATH symlink, and the installed binary. Your data (.env, agent.db) is KEPT
 # by default — pass --purge to delete the data directory too.
 #
-#   curl -fsSL https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.sh | bash -s -- --purge
+#   curl -fsSL https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/uninstall.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/uninstall.sh | bash -s -- --purge
 #
-# Honors OTTO_HOME (same as the installer) to locate a non-default install.
+# Honors MIRRIM_HOME (same as the installer; OTTO_HOME still works) to locate a
+# non-default install. Pre-rename otto and self-assist artifacts are removed too.
 set -euo pipefail
 
-ROOT="${OTTO_HOME:-${SELF_ASSIST_HOME:-$HOME/.local/share/otto}}"
+DEFAULT_ROOT="$HOME/.local/share/mirrim"
+# A pre-rename install that was never upgraded still lives at the otto root.
+[ -d "$DEFAULT_ROOT" ] || [ ! -d "$HOME/.local/share/otto" ] || DEFAULT_ROOT="$HOME/.local/share/otto"
+ROOT="${MIRRIM_HOME:-${OTTO_HOME:-${SELF_ASSIST_HOME:-$DEFAULT_ROOT}}}"
 APP_DIR="$ROOT/app"
 DATA_DIR="$ROOT/data"
 BIN_DIR="$HOME/.local/bin"
-SERVICE_NAME="otto"
-LAUNCHD_LABEL="com.ottoagent.otto"
+SERVICE_NAME="mirrim"
+LAUNCHD_LABEL="com.mirrim.agent"
+OTTO_SERVICE_NAME="otto"
+OTTO_LAUNCHD_LABEL="com.ottoagent.otto"
 PURGE=0
 for arg in "$@"; do
   case "$arg" in
@@ -48,15 +54,17 @@ elif [ "$os" = "Darwin" ]; then
   fi
 fi
 
-# --- Remove the PATH symlink (only if it points into this install) ----------
-link="$BIN_DIR/otto"
-if [ -L "$link" ]; then
-  target=$(readlink "$link" 2>/dev/null || true)
-  case "$target" in
-    "$APP_DIR"/*) rm -f "$link"; say "Removed the CLI symlink $link." ;;
-    *) warn "Left $link in place (points elsewhere: ${target:-unknown})." ;;
-  esac
-fi
+# --- Remove the PATH symlinks (only if they point into this install) ---------
+for name in mirrim otto; do
+  link="$BIN_DIR/$name"
+  if [ -L "$link" ]; then
+    target=$(readlink "$link" 2>/dev/null || true)
+    case "$target" in
+      "$APP_DIR"/*) rm -f "$link"; say "Removed the CLI symlink $link." ;;
+      *) warn "Left $link in place (points elsewhere: ${target:-unknown})." ;;
+    esac
+  fi
+done
 
 # --- Remove the app directory (always) --------------------------------------
 if [ -d "$APP_DIR" ]; then
@@ -76,6 +84,34 @@ else
   if [ -d "$DATA_DIR" ]; then
     say "Kept your data in $DATA_DIR (.env, agent.db). Delete it with: rm -rf \"$DATA_DIR\""
     say "Or re-run with --purge to remove everything."
+  fi
+fi
+
+# --- Pre-rename otto artifacts (otto → mirrim, 2026-08) -----------------------
+if [ "$os" = "Linux" ] && command -v systemctl >/dev/null; then
+  systemctl --user stop "$OTTO_SERVICE_NAME" 2>/dev/null || true
+  systemctl --user disable "$OTTO_SERVICE_NAME" 2>/dev/null || true
+  if [ -f "$HOME/.config/systemd/user/$OTTO_SERVICE_NAME.service" ]; then
+    rm -f "$HOME/.config/systemd/user/$OTTO_SERVICE_NAME.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+    say "Removed the pre-rename systemd user service '$OTTO_SERVICE_NAME'."
+  fi
+elif [ "$os" = "Darwin" ]; then
+  otto_plist="$HOME/Library/LaunchAgents/$OTTO_LAUNCHD_LABEL.plist"
+  launchctl bootout "gui/$(id -u)/$OTTO_LAUNCHD_LABEL" 2>/dev/null || true
+  if [ -f "$otto_plist" ]; then
+    rm -f "$otto_plist"
+    say "Removed the pre-rename launchd agent '$OTTO_LAUNCHD_LABEL'."
+  fi
+fi
+OTTO_ROOT="$HOME/.local/share/otto"
+if [ "$ROOT" != "$OTTO_ROOT" ] && [ -d "$OTTO_ROOT" ]; then
+  rm -rf "$OTTO_ROOT/app"
+  if [ "$PURGE" = 1 ]; then
+    rm -rf "$OTTO_ROOT"
+    say "Purged the pre-rename data directory $OTTO_ROOT."
+  else
+    rmdir "$OTTO_ROOT" 2>/dev/null || say "Kept pre-rename data in $OTTO_ROOT (remove with --purge)."
   fi
 fi
 
@@ -110,7 +146,9 @@ if [ -d "$OLD_ROOT" ]; then
 fi
 
 echo
-say "otto uninstalled."
-if command -v otto >/dev/null 2>&1; then
-  warn "A 'otto' command is still resolvable on your PATH — open a new shell, or check for another copy."
-fi
+say "mirrim uninstalled."
+for name in mirrim otto; do
+  if command -v "$name" >/dev/null 2>&1; then
+    warn "A '$name' command is still resolvable on your PATH — open a new shell, or check for another copy."
+  fi
+done

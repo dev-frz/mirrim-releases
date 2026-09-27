@@ -1,19 +1,25 @@
-# otto uninstaller (Windows): stops and removes the scheduled task, the
+# mirrim uninstaller (Windows): stops and removes the scheduled task, the
 # PATH entry, and the installed binary. Your data (.env, agent.db) is KEPT by
 # default — pass -Purge to delete the data directory too.
 #
-#   irm https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.ps1 | iex
+#   irm https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/uninstall.ps1 | iex
 #   # to also delete data, download and run with the switch:
-#   #   iwr https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.ps1 -OutFile uninstall.ps1; ./uninstall.ps1 -Purge
+#   #   iwr https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/uninstall.ps1 -OutFile uninstall.ps1; ./uninstall.ps1 -Purge
 #
-# Honors $env:OTTO_HOME (same as the installer) for a non-default install.
+# Honors $env:MIRRIM_HOME (same as the installer; $env:OTTO_HOME still works) for
+# a non-default install. Pre-rename otto and self-assist artifacts are removed too.
 param([switch]$Purge)
 $ErrorActionPreference = "Stop"
 
-$Root = if ($env:OTTO_HOME) { $env:OTTO_HOME } else { Join-Path $env:LOCALAPPDATA "otto" }
+$DefaultRoot = Join-Path $env:LOCALAPPDATA "mirrim"
+$OttoRoot = Join-Path $env:LOCALAPPDATA "otto"
+# A pre-rename install that was never upgraded still lives at the otto root.
+if (-not (Test-Path $DefaultRoot) -and (Test-Path $OttoRoot)) { $DefaultRoot = $OttoRoot }
+$Root = if ($env:MIRRIM_HOME) { $env:MIRRIM_HOME } elseif ($env:OTTO_HOME) { $env:OTTO_HOME } else { $DefaultRoot }
 $AppDir = Join-Path $Root "app"
 $DataDir = Join-Path $Root "data"
-$TaskName = "otto"
+$TaskName = "mirrim"
+$OttoTaskName = "otto"
 
 function Say($msg)  { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Warn($msg) { Write-Host "warn: $msg" -ForegroundColor Yellow }
@@ -25,17 +31,19 @@ if ($task) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
     Say "Removed the scheduled task '$TaskName'."
 }
-Get-Process -Name "otto" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name "mirrim", "otto" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-# --- Remove the firewall rule the installer may have added (needs elevation; best-effort)
-try {
-    $fw = Get-NetFirewallRule -DisplayName "otto web console" -ErrorAction SilentlyContinue
-    if ($fw) {
-        $fw | Remove-NetFirewallRule -ErrorAction Stop
-        Say "Removed the 'otto web console' firewall rule."
+# --- Remove the firewall rules the installer may have added (needs elevation; best-effort)
+foreach ($ruleName in @("mirrim web console", "otto web console")) {
+    try {
+        $fw = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+        if ($fw) {
+            $fw | Remove-NetFirewallRule -ErrorAction Stop
+            Say "Removed the '$ruleName' firewall rule."
+        }
+    } catch {
+        Warn "Could not remove the '$ruleName' firewall rule (needs an elevated PowerShell)."
     }
-} catch {
-    Warn "Could not remove the 'otto web console' firewall rule (needs an elevated PowerShell)."
 }
 
 # --- Remove the app dir from the user PATH ----------------------------------
@@ -69,6 +77,30 @@ if ($Purge) {
     Say "Or re-run with -Purge to remove everything."
 }
 
+# --- Pre-rename otto artifacts (otto -> mirrim, 2026-08) -----------------------
+if (Get-ScheduledTask -TaskName $OttoTaskName -ErrorAction SilentlyContinue) {
+    Stop-ScheduledTask -TaskName $OttoTaskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $OttoTaskName -Confirm:$false -ErrorAction SilentlyContinue
+    Say "Removed the pre-rename scheduled task '$OttoTaskName'."
+}
+if (($Root -ne $OttoRoot) -and (Test-Path $OttoRoot)) {
+    $ottoApp = Join-Path $OttoRoot "app"
+    if (Test-Path $ottoApp) { Remove-Item -Recurse -Force $ottoApp }
+    $ottoUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($ottoUserPath) {
+        $kept = ($ottoUserPath -split ';' | Where-Object { $_ -and $_ -ne $ottoApp }) -join ';'
+        if ($kept -ne $ottoUserPath) { [Environment]::SetEnvironmentVariable("Path", $kept, "User") }
+    }
+    if ($Purge) {
+        Remove-Item -Recurse -Force $OttoRoot
+        Say "Purged the pre-rename data directory $OttoRoot."
+    } elseif (-not (Get-ChildItem -Force $OttoRoot -ErrorAction SilentlyContinue)) {
+        Remove-Item -Force $OttoRoot -ErrorAction SilentlyContinue
+    } else {
+        Say "Kept pre-rename data in $OttoRoot (remove with -Purge)."
+    }
+}
+
 # --- Legacy self-assist artifacts (pre-rebrand) ------------------------------
 # Clean up an old install too, so uninstalling after the rename leaves nothing behind.
 if (Get-ScheduledTask -TaskName "self-assist" -ErrorAction SilentlyContinue) {
@@ -96,4 +128,4 @@ if (Test-Path $OldRoot) {
 }
 
 Write-Host ""
-Say "otto uninstalled."
+Say "mirrim uninstalled."

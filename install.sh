@@ -1,36 +1,50 @@
 #!/usr/bin/env bash
-# otto installer (Linux + macOS): downloads the latest self-contained
+# mirrim installer (Linux + macOS): downloads the latest self-contained
 # release (no .NET required), verifies its SHA-256 checksum, installs it
 # per-user, and registers a managed 24/7 service (systemd --user on Linux,
 # launchd LaunchAgent on macOS).
 #
-#   curl -fsSL https://raw.githubusercontent.com/dev-frz/otto-releases/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/install.sh | bash
 #
 # On a first install it asks two questions (skipped on upgrades):
 #   - which port the web console should listen on          (default 5080)
 #   - whether to expose the console to your local network  (default no; when
 #     yes, a CONSOLE_API_TOKEN is generated so access is always authenticated)
-# Non-interactive/scripted installs can preset both: OTTO_PORT=5080 and
-# OTTO_EXPOSE_LAN=true|false. These also work on re-runs to change the
-# settings later.
+# Non-interactive/scripted installs can preset both: MIRRIM_PORT=5080 and
+# MIRRIM_EXPOSE_LAN=true|false (the pre-rename OTTO_* spellings still work).
+# These also work on re-runs to change the settings later.
 #
 # This is the public release channel — no token is needed to install. You can
 # optionally export GITHUB_TOKEN to avoid GitHub's unauthenticated API rate
 # limit when looking up the latest release:
 #
 #   export GITHUB_TOKEN=ghp_...
-#   curl -fsSL https://raw.githubusercontent.com/dev-frz/otto-releases/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/install.sh | bash
 #
 # Re-running upgrades the binary in place and keeps your data (.env, agent.db).
-# Pin a version with OTTO_VERSION=v1.2.3.
+# Pin a version with MIRRIM_VERSION=v1.2.3.
+#
+# Naming: the product was called otto until 2026-08 and is now mirrim. The
+# binary, service, and default install root carry the new name; an `otto`
+# command alias is kept for one release cycle, every OTTO_* / SELF_ASSIST_*
+# environment spelling is still honored, and an existing otto install is
+# migrated in place (data kept) the first time this runs.
 set -euo pipefail
 
-REPO="dev-frz/otto-releases"
-# OTTO_HOME wins; SELF_ASSIST_HOME is honored as the legacy (pre-rebrand) name.
-ROOT="${OTTO_HOME:-${SELF_ASSIST_HOME:-$HOME/.local/share/otto}}"
+# The public release channel (renamed from otto-releases on 2026-09-27; GitHub
+# redirects the old name, so pre-rename installers keep working too).
+REPO="dev-frz/mirrim-releases"
+# MIRRIM_HOME wins; OTTO_HOME and SELF_ASSIST_HOME are honored as the older names.
+DEFAULT_ROOT="$HOME/.local/share/mirrim"
+ROOT="${MIRRIM_HOME:-${OTTO_HOME:-${SELF_ASSIST_HOME:-$DEFAULT_ROOT}}}"
 APP_DIR="$ROOT/app"
 DATA_DIR="$ROOT/data"
-SERVICE_NAME="otto"
+SERVICE_NAME="mirrim"
+LAUNCHD_LABEL="com.mirrim.agent"
+# Pre-rename install (otto): its root, service, and launchd label.
+OTTO_ROOT="$HOME/.local/share/otto"
+OTTO_SERVICE_NAME="otto"
+OTTO_LAUNCHD_LABEL="com.ottoagent.otto"
 TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
 say()    { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -85,7 +99,7 @@ case "$os/$arch" in
 esac
 
 # --- What this run is going to do --------------------------------------------
-say "otto installer starting."
+say "mirrim installer starting."
 detail "Platform:     $os/$arch -> release build '$rid'"
 detail "Install root: $ROOT"
 detail "  app (binary, replaced on upgrade): $APP_DIR"
@@ -98,7 +112,7 @@ detail "Release channel: github.com/$REPO"
 # service, carry the data (.env, agent.db) over, and clean up the old artifacts.
 OLD_ROOT="$HOME/.local/share/self-assist"
 if [ "$ROOT" != "$OLD_ROOT" ] && [ -d "$OLD_ROOT" ]; then
-  say "Found a legacy self-assist install — migrating it to otto..."
+  say "Found a legacy self-assist install — migrating it to mirrim..."
   if [ "$os" = "Linux" ] && command -v systemctl >/dev/null; then
     systemctl --user stop self-assist 2>/dev/null || true
     systemctl --user disable self-assist 2>/dev/null || true
@@ -120,6 +134,42 @@ if [ "$ROOT" != "$OLD_ROOT" ] && [ -d "$OLD_ROOT" ]; then
   say "Legacy self-assist service and app removed."
 fi
 
+# --- Migrate a pre-rename otto install (otto → mirrim, 2026-08) ----------------
+# Two independent steps, because either can apply on its own:
+#  1. The service was registered as `otto`. Retire it whatever the root is — an
+#     in-place upgrade with OTTO_HOME still exported must not leave two services
+#     (otto and mirrim) fighting over the same port and database.
+#  2. If the data lives at the old default root and the new root holds none yet,
+#     move it (the same pattern as the self-assist migration above). Nothing is
+#     deleted until it has been moved.
+if [ "$os" = "Linux" ] && command -v systemctl >/dev/null; then
+  if [ -f "$HOME/.config/systemd/user/$OTTO_SERVICE_NAME.service" ]; then
+    say "Retiring the pre-rename systemd user service '$OTTO_SERVICE_NAME' (it comes back as '$SERVICE_NAME')..."
+    systemctl --user stop "$OTTO_SERVICE_NAME" 2>/dev/null || true
+    systemctl --user disable "$OTTO_SERVICE_NAME" 2>/dev/null || true
+    rm -f "$HOME/.config/systemd/user/$OTTO_SERVICE_NAME.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+  fi
+elif [ "$os" = "Darwin" ]; then
+  if [ -f "$HOME/Library/LaunchAgents/$OTTO_LAUNCHD_LABEL.plist" ]; then
+    say "Retiring the pre-rename launchd agent '$OTTO_LAUNCHD_LABEL' (it comes back as '$LAUNCHD_LABEL')..."
+    launchctl bootout "gui/$(id -u)/$OTTO_LAUNCHD_LABEL" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/$OTTO_LAUNCHD_LABEL.plist"
+  fi
+fi
+if [ "$ROOT" != "$OTTO_ROOT" ] && [ -d "$OTTO_ROOT" ]; then
+  say "Found a pre-rename otto install at $OTTO_ROOT — migrating it to mirrim..."
+  if [ -d "$OTTO_ROOT/data" ] && [ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then
+    rm -rf "$DATA_DIR"
+    mkdir -p "$ROOT"
+    mv "$OTTO_ROOT/data" "$DATA_DIR"
+    say "Moved your data (.env, agent.db) to $DATA_DIR."
+  fi
+  rm -rf "$OTTO_ROOT/app"
+  rmdir "$OTTO_ROOT" 2>/dev/null || true
+  say "Pre-rename otto app removed (your data was kept)."
+fi
+
 # --- First install? Ask the two setup questions up front ----------------------
 # Piped `curl | bash` runs with the script on stdin, so prompts read /dev/tty.
 if [ -f "$DATA_DIR/.env" ]; then first_install=0; else first_install=1; fi
@@ -136,18 +186,18 @@ ask() { # prompt -> echoes the reply (empty on EOF)
 
 valid_port() { case "$1" in ''|*[!0-9]*) return 1 ;; *) [ "$1" -ge 1 ] && [ "$1" -le 65535 ] ;; esac; }
 
-PORT="${OTTO_PORT:-}"
-EXPOSE_LAN="${OTTO_EXPOSE_LAN:-}"
+PORT="${MIRRIM_PORT:-${OTTO_PORT:-}}"
+EXPOSE_LAN="${MIRRIM_EXPOSE_LAN:-${OTTO_EXPOSE_LAN:-}}"
 if [ -n "$PORT" ] && ! valid_port "$PORT"; then
-  warn "Ignoring invalid OTTO_PORT '$PORT' (expected 1-65535)."
+  warn "Ignoring invalid MIRRIM_PORT '$PORT' (expected 1-65535)."
   PORT=""
 fi
-[ -n "$PORT" ] && detail "Console port preset via OTTO_PORT: $PORT"
+[ -n "$PORT" ] && detail "Console port preset via MIRRIM_PORT: $PORT"
 case "$EXPOSE_LAN" in
-  1|y|Y|yes|true|TRUE|True) EXPOSE_LAN=1; detail "Local-network exposure preset via OTTO_EXPOSE_LAN: yes" ;;
-  0|n|N|no|false|FALSE|False) EXPOSE_LAN=0; detail "Local-network exposure preset via OTTO_EXPOSE_LAN: no" ;;
+  1|y|Y|yes|true|TRUE|True) EXPOSE_LAN=1; detail "Local-network exposure preset via MIRRIM_EXPOSE_LAN: yes" ;;
+  0|n|N|no|false|FALSE|False) EXPOSE_LAN=0; detail "Local-network exposure preset via MIRRIM_EXPOSE_LAN: no" ;;
   "") ;;
-  *) warn "Ignoring invalid OTTO_EXPOSE_LAN '$EXPOSE_LAN' (expected true/false)."; EXPOSE_LAN="" ;;
+  *) warn "Ignoring invalid MIRRIM_EXPOSE_LAN '$EXPOSE_LAN' (expected true/false)."; EXPOSE_LAN="" ;;
 esac
 
 if [ "$first_install" = 0 ]; then
@@ -179,7 +229,7 @@ elif [ "$has_tty" = 1 ]; then
   if [ -z "$EXPOSE_LAN" ]; then
     printf '    Expose the web console to your local network (other devices on your Wi-Fi/LAN)?\n' > /dev/tty
     printf '    A console token is generated so access always requires signing in. Default is no\n' > /dev/tty
-    printf '    (localhost only); change later with: otto config set Console__ExposeToNetwork true\n' > /dev/tty
+    printf '    (localhost only); change later with: mirrim config set Console__ExposeToNetwork true\n' > /dev/tty
     reply=$(ask "    Expose to local network? [y/N]: ")
     case "$reply" in y|Y|yes|YES|Yes) EXPOSE_LAN=1 ;; *) EXPOSE_LAN=0 ;; esac
   fi
@@ -187,25 +237,25 @@ else
   [ -z "$PORT" ] && PORT=5080
   [ -z "$EXPOSE_LAN" ] && EXPOSE_LAN=0
   detail "No terminal available: using defaults (port $PORT, exposure $([ "$EXPOSE_LAN" = 1 ] && echo yes || echo no))."
-  detail "Preset them with OTTO_PORT / OTTO_EXPOSE_LAN when scripting this installer."
+  detail "Preset them with MIRRIM_PORT / MIRRIM_EXPOSE_LAN when scripting this installer."
 fi
 
 # --- Resolve the version ------------------------------------------------------
-version="${OTTO_VERSION:-${SELF_ASSIST_VERSION:-}}"
+version="${MIRRIM_VERSION:-${OTTO_VERSION:-${SELF_ASSIST_VERSION:-}}}"
 if [ -n "$version" ]; then
-  say "Using pinned version $version (from OTTO_VERSION)."
+  say "Using pinned version $version (from MIRRIM_VERSION)."
 else
   say "Looking up the latest release..."
   detail "GET https://api.github.com/repos/$REPO/releases/latest$([ -n "$TOKEN" ] && echo ' (authenticated)')"
   version=$(gh_curl "https://api.github.com/repos/$REPO/releases/latest" |
     grep -m1 '"tag_name"' | cut -d'"' -f4) || true
   if [ -z "$version" ]; then
-    fail "could not determine the latest release. Are releases published yet? (Pin one with OTTO_VERSION=vX.Y.Z, or check https://github.com/$REPO/releases)"
+    fail "could not determine the latest release. Are releases published yet? (Pin one with MIRRIM_VERSION=vX.Y.Z, or check https://github.com/$REPO/releases)"
   fi
   detail "Latest release: $version"
 fi
 
-asset="otto-$version-$rid.tar.gz"
+asset="mirrim-$version-$rid.tar.gz"
 
 # --- Download and verify ------------------------------------------------------
 tmp=$(mktemp -d)
@@ -214,8 +264,16 @@ trap 'rm -rf "$tmp"' EXIT
 say "Downloading $asset ..."
 url="https://github.com/$REPO/releases/download/$version/$asset"
 detail "GET $url"
-curl -fsSL -o "$tmp/$asset" "$url" ||
-  fail "download failed: $url (is $asset attached to release $version?)"
+if ! curl -fsSL -o "$tmp/$asset" "$url"; then
+  # Releases published before the binary rename (v0.9.x and older) carry
+  # otto-* assets. A pinned old version still installs — under the new layout.
+  legacy_asset="otto-$version-$rid.tar.gz"
+  legacy_url="https://github.com/$REPO/releases/download/$version/$legacy_asset"
+  detail "Not found; trying the pre-rename asset name: GET $legacy_url"
+  curl -fsSL -o "$tmp/$legacy_asset" "$legacy_url" ||
+    fail "download failed: $url (is $asset attached to release $version?)"
+  asset="$legacy_asset"
+fi
 if command -v du >/dev/null 2>&1; then
   detail "Downloaded $(du -h "$tmp/$asset" | cut -f1 | tr -d ' ') to $tmp/$asset"
 fi
@@ -242,25 +300,36 @@ else
 fi
 
 # Stop a running service before replacing the binary (ignore if not installed).
-say "Stopping any running otto service..."
+say "Stopping any running mirrim service..."
 if [ "$os" = "Linux" ] && command -v systemctl >/dev/null; then
   systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
 elif [ "$os" = "Darwin" ]; then
-  launchctl bootout "gui/$(id -u)/com.ottoagent.otto" 2>/dev/null || true
+  launchctl bootout "gui/$(id -u)/$LAUNCHD_LABEL" 2>/dev/null || true
 fi
 
 say "Installing to $APP_DIR ..."
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR" "$DATA_DIR"
 tar -xzf "$tmp/$asset" -C "$APP_DIR"
-chmod +x "$APP_DIR/otto"
+# The binary is `mirrim`; releases ship an `otto` symlink beside it for one
+# release cycle. A pre-rename release only has `otto` — give it the new name too,
+# so the service unit and the docs below hold for every installable version.
+if [ -e "$APP_DIR/mirrim" ]; then
+  chmod +x "$APP_DIR/mirrim"
+else
+  chmod +x "$APP_DIR/otto"
+  ln -s otto "$APP_DIR/mirrim"
+fi
+[ -e "$APP_DIR/otto" ] || ln -s mirrim "$APP_DIR/otto"
 detail "Extracted $(find "$APP_DIR" -type f | wc -l | tr -d ' ') files."
 
-# Put `otto` on PATH via a symlink in a per-user bin dir, so the CLI works
+# Put `mirrim` on PATH via a symlink in a per-user bin dir, so the CLI works
 # by name (matching the docs) without the operator editing PATH themselves.
+# `otto` stays resolvable as an alias for one release cycle.
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
-ln -sf "$APP_DIR/otto" "$BIN_DIR/otto"
+ln -sf "$APP_DIR/mirrim" "$BIN_DIR/mirrim"
+ln -sf "$APP_DIR/mirrim" "$BIN_DIR/otto"
 case ":$PATH:" in
   *":$BIN_DIR:"*) on_path=1 ;;
   *)              on_path=0 ;;
@@ -295,12 +364,12 @@ if [ "$os" = "Linux" ] && command -v systemctl >/dev/null; then
   mkdir -p "$HOME/.config/systemd/user"
   cat > "$HOME/.config/systemd/user/$SERVICE_NAME.service" <<UNIT
 [Unit]
-Description=otto personal AI agent
+Description=mirrim personal AI agent
 After=network-online.target
 
 [Service]
 Type=notify
-ExecStart=$APP_DIR/otto
+ExecStart=$APP_DIR/mirrim
 WorkingDirectory=$DATA_DIR
 Restart=on-failure
 RestartSec=5
@@ -322,33 +391,33 @@ UNIT
     systemctl --user restart "$SERVICE_NAME"
     say "Restarted the systemd user service '$SERVICE_NAME'."
   fi
-  say "Logs: journalctl --user -u $SERVICE_NAME -f   (and $DATA_DIR/logs/, or 'otto logs')"
+  say "Logs: journalctl --user -u $SERVICE_NAME -f   (and $DATA_DIR/logs/, or 'mirrim logs')"
   # A systemd *user* service only starts at boot when lingering is enabled for this
-  # account — without it, otto stays down after a reboot until someone logs in.
+  # account — without it, mirrim stays down after a reboot until someone logs in.
   # Enabling your own linger is allowed without root on most distros; fall back to
   # an explicit instruction where policy forbids it.
   if command -v loginctl >/dev/null && [ "$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null)" != "yes" ]; then
     loginctl enable-linger "$USER" 2>/dev/null || true
     if [ "$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null)" = "yes" ]; then
-      say "Enabled lingering: otto now starts at boot and keeps running after you log out."
+      say "Enabled lingering: mirrim now starts at boot and keeps running after you log out."
     else
-      say "IMPORTANT: could not enable lingering — after a reboot otto stays down until you log in."
+      say "IMPORTANT: could not enable lingering — after a reboot mirrim stays down until you log in."
       say "Fix it once with:  sudo loginctl enable-linger $USER"
     fi
   fi
 elif [ "$os" = "Darwin" ]; then
-  say "Registering the launchd agent 'com.ottoagent.otto'..."
-  detail "Plist:  ~/Library/LaunchAgents/com.ottoagent.otto.plist"
+  say "Registering the launchd agent '$LAUNCHD_LABEL'..."
+  detail "Plist:  ~/Library/LaunchAgents/$LAUNCHD_LABEL.plist"
   detail "Policy: RunAtLoad + KeepAlive (restarts on any non-clean exit)"
-  plist="$HOME/Library/LaunchAgents/com.ottoagent.otto.plist"
+  plist="$HOME/Library/LaunchAgents/$LAUNCHD_LABEL.plist"
   mkdir -p "$HOME/Library/LaunchAgents"
   cat > "$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.ottoagent.otto</string>
-  <key>ProgramArguments</key><array><string>$APP_DIR/otto</string></array>
+  <key>Label</key><string>$LAUNCHD_LABEL</string>
+  <key>ProgramArguments</key><array><string>$APP_DIR/mirrim</string></array>
   <key>WorkingDirectory</key><string>$DATA_DIR</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
@@ -362,21 +431,21 @@ PLIST
     # Load it now: with no key it comes up in first-run SETUP MODE, serving a browser
     # setup page at http://localhost:$PORT so you can finish setup without editing files.
     launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || launchctl load "$plist"
-    say "Registered and started the launchd agent 'com.ottoagent.otto' in first-run setup mode."
+    say "Registered and started the launchd agent '$LAUNCHD_LABEL' in first-run setup mode."
   else
     launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || launchctl load "$plist"
-    say "Registered and started the launchd agent 'com.ottoagent.otto'."
+    say "Registered and started the launchd agent '$LAUNCHD_LABEL'."
   fi
   say "Logs: $DATA_DIR/logs/"
 else
   say "No supported service manager found — run it manually:"
-  say "  cd $DATA_DIR && $APP_DIR/otto"
+  say "  cd $DATA_DIR && $APP_DIR/mirrim"
 fi
 
 # --- Firewall (only relevant when exposing to the local network) --------------
 if [ "$EXPOSE_LAN" = 1 ]; then
   if [ "$os" = "Darwin" ]; then
-    say "macOS may ask to allow incoming connections for 'otto' — click Allow."
+    say "macOS may ask to allow incoming connections for 'mirrim' — click Allow."
   elif command -v ufw >/dev/null 2>&1 || command -v firewall-cmd >/dev/null 2>&1; then
     say "This host runs a firewall — allow the console port for your LAN, e.g.:"
     if command -v ufw >/dev/null 2>&1; then
@@ -398,7 +467,7 @@ else
 fi
 
 # The CLI name works only once BIN_DIR is on PATH; otherwise show the full path.
-if [ "$on_path" = 1 ]; then cli="otto"; else cli="$BIN_DIR/otto"; fi
+if [ "$on_path" = 1 ]; then cli="mirrim"; else cli="$BIN_DIR/mirrim"; fi
 
 # Best-effort LAN address for the summary when exposing.
 lan_ip=""
@@ -416,7 +485,7 @@ say "Install summary"
 detail "Version:  $version"
 detail "App:      $APP_DIR"
 detail "Data:     $DATA_DIR  (.env, agent.db, logs - kept across upgrades)"
-detail "CLI:      $BIN_DIR/otto -> $APP_DIR/otto"
+detail "CLI:      $BIN_DIR/mirrim -> $APP_DIR/mirrim   (and 'otto' as an alias for one more release)"
 if [ "$EXPOSE_LAN" = 1 ]; then
   detail "Console:  http://localhost:$PORT  +  http://${lan_ip:-<this-machine>}:$PORT (local network)"
   if [ -n "$console_token" ]; then
@@ -430,7 +499,7 @@ detail "Uninstall: curl -fsSL https://raw.githubusercontent.com/$REPO/main/unins
 if [ "$on_path" = 0 ]; then
   say "$BIN_DIR is not on your PATH. Add it (then open a new shell):"
   echo "        echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.profile"
-  echo "    Until then, run the CLI by full path: $BIN_DIR/otto"
+  echo "    Until then, run the CLI by full path: $BIN_DIR/mirrim"
 fi
 echo
 if [ "$first_install" = 1 ] && [ "$headless" = 1 ]; then
@@ -448,7 +517,7 @@ if [ "$first_install" = 1 ] && [ "$headless" = 1 ]; then
   if ! { [ "$os" = "Linux" ] && command -v systemctl >/dev/null; } && [ "$os" != "Darwin" ]; then
     echo
     echo "    No service manager was found — start it first with:"
-    echo "        cd $DATA_DIR && $APP_DIR/otto"
+    echo "        cd $DATA_DIR && $APP_DIR/mirrim"
   fi
   echo
 elif [ "$first_install" = 1 ]; then
@@ -467,7 +536,7 @@ elif [ "$first_install" = 1 ]; then
   if ! { [ "$os" = "Linux" ] && command -v systemctl >/dev/null; } && [ "$os" != "Darwin" ]; then
     echo
     echo "    No service manager was found — start it first with:"
-    echo "        cd $DATA_DIR && $APP_DIR/otto"
+    echo "        cd $DATA_DIR && $APP_DIR/mirrim"
   fi
   echo
 else

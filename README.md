@@ -1,15 +1,15 @@
-<p align="center"><strong>otto</strong></p>
+<p align="center"><strong>mirrim</strong></p>
 
-# Otto — a personal AI agent that's actually *yours*
+# mirrim — a personal AI agent that's actually *yours*
 
-Otto is an AI assistant that lives on **your** computer instead of somebody
+mirrim is an AI assistant that lives on **your** computer instead of somebody
 else's cloud. It remembers what matters to you, works on things while you're
 away, and reaches you wherever you already are — your browser, your phone,
 Telegram, even out loud. Everything it knows lives in one database file on
 your machine that you can copy, back up, or delete whenever you like.
 
 - **It's yours.** No account, no subscription to this project, no lock-in.
-  Use Claude for the smartest experience, or pair otto with a **free local
+  Use Claude for the smartest experience, or pair mirrim with a **free local
   model** (Ollama, LM Studio, and friends) so even the AI runs on your hardware.
 - **It's light.** The entire agent installs as a single self-contained binary
   (about 55 MB, no .NET runtime required) and runs as one process in a few
@@ -27,7 +27,7 @@ your machine that you can copy, back up, or delete whenever you like.
 
 This repository is the **public download & install channel**: it contains no
 source code — only the installers below and the published build artifacts under
-[**Releases**](https://github.com/dev-frz/otto-releases/releases). Each
+[**Releases**](https://github.com/dev-frz/mirrim-releases/releases). Each
 release ships self-contained bundles for Linux, macOS, and Windows, plus
 SHA-256 checksums and an SBOM.
 
@@ -36,13 +36,13 @@ SHA-256 checksums and an SBOM.
 **Linux / macOS**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dev-frz/otto-releases/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/install.sh | bash
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/dev-frz/otto-releases/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/install.ps1 | iex
 ```
 
 The installer downloads the right build for your OS/arch, verifies it against
@@ -57,7 +57,7 @@ Re-running upgrades the binary in place and keeps your data and settings
 
 After the first install, open <http://localhost:5080> (or your chosen port) and
 finish setup in the browser — pick a provider and paste your key (or choose a
-local model and skip keys entirely). On a headless box run `otto setup` in the
+local model and skip keys entirely). On a headless box run `mirrim setup` in the
 terminal instead.
 
 ## Uninstall
@@ -68,24 +68,24 @@ Stops and removes the service, the PATH entry, and the binary. Your data
 **Linux / macOS**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/uninstall.sh | bash
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-iwr https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.ps1 -OutFile uninstall.ps1; ./uninstall.ps1
+iwr https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/uninstall.ps1 -OutFile uninstall.ps1; ./uninstall.ps1
 ```
 
 ## Options
 
 - **Pin a version** — install a specific release instead of the latest:
-  `OTTO_VERSION=v1.2.3` (bash) or `$env:OTTO_VERSION = "v1.2.3"`
+  `MIRRIM_VERSION=v1.2.3` (bash) or `$env:MIRRIM_VERSION = "v1.2.3"`
   (PowerShell) before running the installer.
 - **Custom install location** — `OTTO_HOME=/path` / `$env:OTTO_HOME`.
 - **Scripted answers** — preset the first-install questions with
-  `OTTO_PORT=5080` and `OTTO_EXPOSE_LAN=true|false` (bash) or
-  `$env:OTTO_PORT` / `$env:OTTO_EXPOSE_LAN` (PowerShell). These also work on
+  `MIRRIM_PORT=5080` and `MIRRIM_EXPOSE_LAN=true|false` (bash) or
+  `$env:MIRRIM_PORT` / `$env:MIRRIM_EXPOSE_LAN` (PowerShell). These also work on
   re-runs to change the settings of an existing install.
 - **API rate limits** — installing needs no token. Optionally set `GITHUB_TOKEN`
   to lift GitHub's unauthenticated API rate limit on the "latest release" lookup.
@@ -93,18 +93,18 @@ iwr https://raw.githubusercontent.com/dev-frz/otto-releases/main/uninstall.ps1 -
 ## Manual download
 
 Prefer to install by hand? Grab the asset for your platform from the
-[latest release](https://github.com/dev-frz/otto-releases/releases/latest):
+[latest release](https://github.com/dev-frz/mirrim-releases/releases/latest):
 
 | Platform            | Asset                                   |
 | ------------------- | --------------------------------------- |
-| Linux x64           | `otto-<version>-linux-x64.tar.gz`   |
-| Linux arm64         | `otto-<version>-linux-arm64.tar.gz` |
-| macOS x64 (Intel)   | `otto-<version>-osx-x64.tar.gz`     |
-| macOS arm64 (Apple) | `otto-<version>-osx-arm64.tar.gz`   |
-| Windows x64         | `otto-<version>-win-x64.zip`        |
+| Linux x64           | `mirrim-<version>-linux-x64.tar.gz`   |
+| Linux arm64         | `mirrim-<version>-linux-arm64.tar.gz` |
+| macOS x64 (Intel)   | `mirrim-<version>-osx-x64.tar.gz`     |
+| macOS arm64 (Apple) | `mirrim-<version>-osx-arm64.tar.gz`   |
+| Windows x64         | `mirrim-<version>-win-x64.zip`        |
 
 Verify against `SHA256SUMS` (attached to each release), extract, and run the
-`otto` executable.
+`mirrim` executable.
 
 ## Verify a download
 
