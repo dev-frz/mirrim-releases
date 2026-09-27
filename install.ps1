@@ -445,20 +445,40 @@ if ($ExposeLan -and $consoleToken) {
 Detail "Logs:      $DataDir\logs\   (or 'mirrim logs')"
 Detail "Uninstall: irm https://raw.githubusercontent.com/$Repo/main/uninstall.ps1 | iex"
 Write-Host ""
-if ($firstInstall) {
-    Say "Installed. Finish setup in your browser:"
+# A remote/headless session (SSH into Windows, a non-interactive host, Server Core) has no
+# browser to open; lead with the terminal wizard there. Everywhere else, open the page.
+$headless = [bool]$env:SSH_CONNECTION -or [bool]$env:SSH_TTY -or -not [Environment]::UserInteractive
+function Wait-ForConsole([string]$Url) {
+    for ($i = 0; $i -lt 30; $i++) {
+        try { Invoke-WebRequest -UseBasicParsing -Uri "$Url/health" -TimeoutSec 1 | Out-Null; return $true } catch { Start-Sleep -Milliseconds 500 }
+    }
+    return $false
+}
+if ($firstInstall -and $headless) {
+    Say "Installed on a headless/remote host. Finish setup in the terminal:"
+    Write-Host ""
+    Write-Host "        mirrim setup"
+    Write-Host ""
+    Write-Host "    It prompts for a provider + key, checks the connection, writes $envFile, and starts the agent."
+    Write-Host "    Prefer a browser? The setup page is loopback-only for safety — forward the port:"
+    Write-Host "        ssh -L ${Port}:localhost:$Port <user>@<this-host>   # then open http://localhost:$Port"
+    Write-Host ""
+} elseif ($firstInstall) {
+    $opened = $false
+    if ($started -and (Wait-ForConsole "http://localhost:$Port")) {
+        try { Start-Process "http://localhost:$Port"; $opened = $true } catch { $opened = $false }
+    }
+    if ($opened) { Say "Installed. The setup page is opening in your browser:" } else { Say "Installed. Finish setup in your browser:" }
     Write-Host ""
     Write-Host "        http://localhost:$Port"
     Write-Host ""
-    Write-Host "    Pick a provider and paste your key — it's saved to $envFile"
-    Write-Host "    and the agent restarts into normal mode automatically."
+    Write-Host "    Pick a provider and paste your key — mirrim checks the connection, saves it to $envFile"
+    Write-Host "    and restarts into normal mode automatically."
     if ($ExposeLan) {
         Write-Host "    Note: for safety, first-run setup only answers on THIS machine (localhost)."
         Write-Host "    The local-network URL starts working right after setup completes."
     }
-    Write-Host "    Prefer the terminal (or a headless/Server Core host)? Run:  mirrim setup"
-    Write-Host "    Remote box with no local browser? Forward the port from your machine:"
-    Write-Host "        ssh -L ${Port}:localhost:$Port <user>@<this-host>   # then open http://localhost:$Port"
+    Write-Host "    Prefer the terminal? Run:  mirrim setup"
     Write-Host ""
 } else {
     Say "Upgraded to $version. Your data in $DataDir was kept."

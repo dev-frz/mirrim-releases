@@ -459,12 +459,40 @@ fi
 # Headless/remote host? No local browser to open the setup page. Treat an SSH
 # session, or a Linux box with no display server, as headless and lead with the
 # terminal wizard instead of a localhost URL the operator can't reach.
+# WSL has no DISPLAY but does have the Windows browser one hop away (wslview or
+# cmd.exe), so it is a desktop, not a server.
+is_wsl=0
+if [ "$os" = "Linux" ] && grep -qi microsoft /proc/version 2>/dev/null; then is_wsl=1; fi
 if [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_TTY:-}" ] \
-   || { [ "$os" = "Linux" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; }; then
+   || { [ "$os" = "Linux" ] && [ "$is_wsl" = 0 ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; }; then
   headless=1
 else
   headless=0
 fi
+
+# Open the setup page ourselves once the service answers, so the user is not asked to
+# copy a URL out of a terminal. Best effort: any failure just leaves the URL on screen.
+open_browser() { # url
+  if [ "$os" = "Darwin" ]; then
+    open "$1" >/dev/null 2>&1 || return 1
+  elif [ "$is_wsl" = 1 ]; then
+    if command -v wslview >/dev/null 2>&1; then wslview "$1" >/dev/null 2>&1 || return 1
+    elif command -v cmd.exe >/dev/null 2>&1; then cmd.exe /c start "" "$1" >/dev/null 2>&1 || return 1
+    else return 1; fi
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$1" >/dev/null 2>&1 || return 1
+  else
+    return 1
+  fi
+}
+
+wait_for_console() { # url, up to ~15 s
+  for _ in $(seq 1 30); do
+    if curl -fsS --max-time 1 "$1/health" >/dev/null 2>&1; then return 0; fi
+    sleep 0.5
+  done
+  return 1
+}
 
 # The CLI name works only once BIN_DIR is on PATH; otherwise show the full path.
 if [ "$on_path" = 1 ]; then cli="mirrim"; else cli="$BIN_DIR/mirrim"; fi
@@ -521,7 +549,13 @@ if [ "$first_install" = 1 ] && [ "$headless" = 1 ]; then
   fi
   echo
 elif [ "$first_install" = 1 ]; then
-  say "Installed. Finish setup in your browser:"
+  opened=0
+  if wait_for_console "http://localhost:$PORT" && open_browser "http://localhost:$PORT"; then opened=1; fi
+  if [ "$opened" = 1 ]; then
+    say "Installed. The setup page is opening in your browser:"
+  else
+    say "Installed. Finish setup in your browser:"
+  fi
   echo
   echo "        http://localhost:$PORT"
   echo
