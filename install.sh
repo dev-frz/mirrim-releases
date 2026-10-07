@@ -76,6 +76,15 @@ env_get() { # file key -> value (empty when unset)
   grep "^$2=" "$1" 2>/dev/null | tail -n1 | cut -d'=' -f2- || true
 }
 
+service_start_failed() { # the unit did not reach ready in time, or exited
+  say "WARNING: '$SERVICE_NAME' did not report ready — the install is complete, but the service is not up yet."
+  detail "systemd keeps retrying (Restart=on-failure). The last lines of its log:"
+  journalctl --user -u "$SERVICE_NAME" -n 25 --no-pager 2>/dev/null | sed 's/^/    /' || true
+  detail "Check:   systemctl --user status $SERVICE_NAME"
+  detail "Follow:  journalctl --user -u $SERVICE_NAME -f"
+  detail "A first start on an older database may be running a one-time VACUUM; let it finish."
+}
+
 gen_token() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32
@@ -371,6 +380,10 @@ After=network-online.target
 Type=notify
 ExecStart=$APP_DIR/mirrim
 WorkingDirectory=$DATA_DIR
+# Startup counts as done only when the app reports ready, after migrations, a
+# one-time VACUUM on an older database, and every connector's handshake. systemd's
+# default of 90s has killed healthy upgrades mid-VACUUM; give a slow first start room.
+TimeoutStartSec=300
 Restart=on-failure
 RestartSec=5
 # A missing LLM key makes the app exit 78 (EX_CONFIG). Don't crash-loop on a
@@ -382,14 +395,21 @@ WantedBy=default.target
 UNIT
   systemctl --user daemon-reload
   systemctl --user enable "$SERVICE_NAME"
+  # The install itself is complete here; a slow or failed first start must not abort the
+  # script with a bare systemd error. Report what happened and where to look instead —
+  # Restart=on-failure keeps trying in the background either way.
   if [ "$first_install" = 1 ]; then
     # Start it now: with no key it comes up in first-run SETUP MODE, serving a browser
     # setup page at http://localhost:$PORT so you can finish setup without editing files.
-    systemctl --user start "$SERVICE_NAME"
-    say "Started the systemd user service '$SERVICE_NAME' in first-run setup mode."
-  else
-    systemctl --user restart "$SERVICE_NAME"
+    if systemctl --user start "$SERVICE_NAME"; then
+      say "Started the systemd user service '$SERVICE_NAME' in first-run setup mode."
+    else
+      service_start_failed
+    fi
+  elif systemctl --user restart "$SERVICE_NAME"; then
     say "Restarted the systemd user service '$SERVICE_NAME'."
+  else
+    service_start_failed
   fi
   say "Logs: journalctl --user -u $SERVICE_NAME -f   (and $DATA_DIR/logs/, or 'mirrim logs')"
   # A systemd *user* service only starts at boot when lingering is enabled for this
