@@ -6,13 +6,18 @@
 #
 #   irm https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/install.ps1 | iex
 #
-# On a first install it asks two questions (skipped on upgrades):
+# On a first install it asks three questions (the first two are skipped on upgrades):
 #   - which port the web console should listen on          (default 5080)
 #   - whether to expose the console to your local network  (default no; when
 #     yes, a CONSOLE_API_TOKEN is generated so access is always authenticated)
-# Non-interactive/scripted installs can preset both: $env:MIRRIM_PORT and
-# $env:MIRRIM_EXPOSE_LAN ("true"/"false"); the pre-rename $env:OTTO_* spellings
-# still work. These also work on re-runs to change the settings later.
+#   - whether to download the semantic memory model        (default yes; a
+#     one-time 34 MB English model, SHA-256 verified, that runs on this machine
+#     so memory search finds meaning, not just matching words). Asked once on
+#     an upgrade too, while the model is missing and was never declined.
+# Non-interactive/scripted installs can preset all three: $env:MIRRIM_PORT,
+# $env:MIRRIM_EXPOSE_LAN and $env:MIRRIM_SEMANTIC_MEMORY ("true"/"false"); the
+# pre-rename $env:OTTO_* spellings still work for the first two. These also work
+# on re-runs to change the settings later.
 #
 # This is the public release channel — no token is needed to install. You can
 # optionally set $env:GITHUB_TOKEN to avoid GitHub's unauthenticated API rate
@@ -222,6 +227,35 @@ if (-not $firstInstall) {
     Detail "Preset them with `$env:MIRRIM_PORT / `$env:MIRRIM_EXPOSE_LAN when scripting this installer."
 }
 
+# --- Semantic memory model ----------------------------------------------------
+# mirrim downloads nothing by itself at runtime; this question is the consent. The
+# download itself is done by the new binary (`mirrim embeddings install`) after it is
+# unpacked, so the pinned hashes live in exactly one place.
+$ModelsDir = Join-Path $DataDir "models"
+$SemanticDeclinedMarker = Join-Path $ModelsDir ".semantic-memory-declined"
+$Semantic = $null
+if ($null -ne $env:MIRRIM_SEMANTIC_MEMORY -and $env:MIRRIM_SEMANTIC_MEMORY -ne "") {
+    $Semantic = Test-TruthyFlag $env:MIRRIM_SEMANTIC_MEMORY
+    Detail "Semantic memory model preset via MIRRIM_SEMANTIC_MEMORY: $Semantic"
+}
+if ($null -eq $Semantic -and (Test-Path (Join-Path $ModelsDir "bge-small-en-v1.5\model.onnx"))) {
+    $Semantic = $true   # already installed: re-verify it, download nothing
+} elseif ($null -eq $Semantic -and -not $firstInstall -and (Test-Path $SemanticDeclinedMarker)) {
+    $Semantic = $false  # declined on an earlier run: never ask again
+} elseif ($null -eq $Semantic -and $Interactive) {
+    Write-Host "    Semantic memory: let mirrim find memories by meaning, not just matching words" -ForegroundColor Gray
+    Write-Host "    (""my car broke down"" finds ""the vehicle needs a mechanic""). This downloads a small" -ForegroundColor DarkGray
+    Write-Host "    English model once: 34 MB, checked against pinned SHA-256 hashes. It runs on this" -ForegroundColor DarkGray
+    Write-Host "    machine and your text never leaves it. Default is yes; add it later with:" -ForegroundColor DarkGray
+    Write-Host "    mirrim embeddings install" -ForegroundColor DarkGray
+    $answer = Read-Host "    Download the semantic memory model? [Y/n]"
+    $Semantic = -not ($answer -match '^(n|no)$')
+} elseif ($null -eq $Semantic) {
+    $Semantic = $true
+    Detail "Non-interactive session: downloading the semantic memory model (34 MB) by default."
+    Detail "Skip it in scripted installs with `$env:MIRRIM_SEMANTIC_MEMORY = ""false""."
+}
+
 # --- Pick the release ---------------------------------------------------------
 $version = if ($env:MIRRIM_VERSION) { $env:MIRRIM_VERSION } elseif ($env:OTTO_VERSION) { $env:OTTO_VERSION } else { $env:SELF_ASSIST_VERSION }
 if ($version) {
@@ -337,6 +371,37 @@ if ($ExposeLan -and -not $consoleToken) {
     Detail "CONSOLE_API_TOKEN already set - keeping it."
 }
 
+# --- Install the semantic memory model (before the service starts) -----------
+# Done before the scheduled task starts, so the agent boots with semantic memory on.
+# A failure never fails the install: mirrim runs with word-matching memory meanwhile.
+$semanticState = "word matching (enable: mirrim embeddings install, then mirrim restart)"
+if ($Semantic) {
+    Say "Installing the semantic memory model (34 MB, verified by SHA-256)..."
+    Detail "Into: $(Join-Path $ModelsDir 'bge-small-en-v1.5')"
+    Push-Location $DataDir
+    try { & $exe embeddings install; $modelInstalled = ($LASTEXITCODE -eq 0) }
+    catch { $modelInstalled = $false }
+    finally { Pop-Location }
+    if ($modelInstalled) {
+        Remove-Item -Force -ErrorAction SilentlyContinue $SemanticDeclinedMarker
+        $semanticState = "meaning (in-process model bge-small-en-v1.5)"
+        # Installs before this release seeded Embeddings__Provider=Hashing, which pins word
+        # matching and would leave the model unused. You just chose semantic memory, so let
+        # mirrim pick the best backend at startup instead.
+        if ((Get-EnvValue $envFile "Embeddings__Provider") -eq "Hashing") {
+            Set-EnvValue $envFile "Embeddings__Provider" "Auto"
+            Detail "Embeddings__Provider: Hashing -> Auto, so mirrim uses the model (set it back with mirrim config set)."
+        }
+    } else {
+        Warn "The semantic memory model was not installed; mirrim works meanwhile with word matching."
+        Warn "Retry any time with:  mirrim embeddings install   then:  mirrim restart"
+    }
+} else {
+    New-Item -ItemType Directory -Force -Path $ModelsDir | Out-Null
+    New-Item -ItemType File -Force -Path $SemanticDeclinedMarker | Out-Null
+    Detail "Semantic memory model skipped. Add it later with: mirrim embeddings install"
+}
+
 # --- Register the scheduled task ----------------------------------------------
 # The task runs mirrim.exe with --hidden so no terminal window appears (closing such a
 # window used to kill the agent). Preferred logon type is S4U: the task then runs in
@@ -437,6 +502,7 @@ Detail "Version:   $version"
 Detail "App:       $AppDir"
 Detail "Data:      $DataDir  (.env, agent.db, logs - kept across upgrades)"
 Detail "Service:   Scheduled Task '$TaskName' - $serviceMode"
+Detail "Memory:    search by $semanticState"
 Detail "Console:   http://localhost:$Port$(if ($ExposeLan) { if ($lanIp) { "  +  http://${lanIp}:$Port (local network)" } else { '  + your machine''s IP on the local network' } } else { '  (localhost only)' })"
 if ($ExposeLan -and $consoleToken) {
     Detail "Sign-in token for other devices (from CONSOLE_API_TOKEN in $envFile):"

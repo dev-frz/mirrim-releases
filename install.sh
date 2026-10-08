@@ -6,13 +6,18 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/dev-frz/mirrim-releases/main/install.sh | bash
 #
-# On a first install it asks two questions (skipped on upgrades):
+# On a first install it asks three questions (the first two are skipped on upgrades):
 #   - which port the web console should listen on          (default 5080)
 #   - whether to expose the console to your local network  (default no; when
 #     yes, a CONSOLE_API_TOKEN is generated so access is always authenticated)
-# Non-interactive/scripted installs can preset both: MIRRIM_PORT=5080 and
-# MIRRIM_EXPOSE_LAN=true|false (the pre-rename OTTO_* spellings still work).
-# These also work on re-runs to change the settings later.
+#   - whether to download the semantic memory model        (default yes; a
+#     one-time 34 MB English model, SHA-256 verified, that runs on this machine
+#     so memory search finds meaning, not just matching words). Asked once on
+#     an upgrade too, while the model is missing and was never declined.
+# Non-interactive/scripted installs can preset all three: MIRRIM_PORT=5080,
+# MIRRIM_EXPOSE_LAN=true|false and MIRRIM_SEMANTIC_MEMORY=true|false (the
+# pre-rename OTTO_* spellings still work for the first two). These also work on
+# re-runs to change the settings later.
 #
 # This is the public release channel — no token is needed to install. You can
 # optionally export GITHUB_TOKEN to avoid GitHub's unauthenticated API rate
@@ -249,6 +254,47 @@ else
   detail "Preset them with MIRRIM_PORT / MIRRIM_EXPOSE_LAN when scripting this installer."
 fi
 
+# --- Semantic memory model ----------------------------------------------------
+# mirrim downloads nothing by itself at runtime; this question is the consent. The
+# download itself is done by the new binary (`mirrim embeddings install`) after it is
+# unpacked, so the pinned hashes live in exactly one place.
+MODELS_DIR="$DATA_DIR/models"
+SEMANTIC_DECLINED_MARKER="$MODELS_DIR/.semantic-memory-declined"
+SEMANTIC="${MIRRIM_SEMANTIC_MEMORY:-}"
+case "$SEMANTIC" in
+  1|y|Y|yes|true|TRUE|True) SEMANTIC=1; detail "Semantic memory model preset via MIRRIM_SEMANTIC_MEMORY: yes" ;;
+  0|n|N|no|false|FALSE|False) SEMANTIC=0; detail "Semantic memory model preset via MIRRIM_SEMANTIC_MEMORY: no" ;;
+  "") ;;
+  *) warn "Ignoring invalid MIRRIM_SEMANTIC_MEMORY '$SEMANTIC' (expected true/false)."; SEMANTIC="" ;;
+esac
+if [ "$rid" = "osx-x64" ]; then
+  [ "$SEMANTIC" = 1 ] && warn "The semantic memory model does not run on Intel Macs; skipping it."
+  SEMANTIC=0
+  detail "Semantic memory: the in-process model does not run on Intel Macs. For semantic memory,"
+  detail "  install Ollama and run 'ollama pull nomic-embed-text'; mirrim detects it on restart."
+elif [ -z "$SEMANTIC" ] && [ -f "$MODELS_DIR/bge-small-en-v1.5/model.onnx" ]; then
+  SEMANTIC=1  # already installed: re-verify it, download nothing
+elif [ -z "$SEMANTIC" ] && [ "$first_install" = 0 ] && [ -f "$SEMANTIC_DECLINED_MARKER" ]; then
+  SEMANTIC=0  # declined on an earlier run: never ask again
+elif [ -z "$SEMANTIC" ] && [ "$has_tty" = 1 ]; then
+  printf '    Semantic memory: let mirrim find memories by meaning, not just matching words
+' > /dev/tty
+  printf '    ("my car broke down" finds "the vehicle needs a mechanic"). This downloads a small
+' > /dev/tty
+  printf '    English model once: 34 MB, checked against pinned SHA-256 hashes. It runs on this
+' > /dev/tty
+  printf '    machine and your text never leaves it. Default is yes; add it later with:
+' > /dev/tty
+  printf '    mirrim embeddings install
+' > /dev/tty
+  reply=$(ask "    Download the semantic memory model? [Y/n]: ")
+  case "$reply" in n|N|no|NO|No) SEMANTIC=0 ;; *) SEMANTIC=1 ;; esac
+elif [ -z "$SEMANTIC" ]; then
+  SEMANTIC=1
+  detail "No terminal available: downloading the semantic memory model (34 MB) by default."
+  detail "Skip it in scripted installs with MIRRIM_SEMANTIC_MEMORY=false."
+fi
+
 # --- Resolve the version ------------------------------------------------------
 version="${MIRRIM_VERSION:-${OTTO_VERSION:-${SELF_ASSIST_VERSION:-}}}"
 if [ -n "$version" ]; then
@@ -363,6 +409,35 @@ if [ "$EXPOSE_LAN" = 1 ] && [ -z "$console_token" ]; then
   detail "CONSOLE_API_TOKEN=<generated 64-char token> (required for network access; stored only in .env)"
 elif [ "$EXPOSE_LAN" = 1 ]; then
   detail "CONSOLE_API_TOKEN already set — keeping it."
+fi
+
+# --- Install the semantic memory model (before the service starts) -----------
+# Done before the service (re)starts, so the agent boots with semantic memory on.
+# A failure never fails the install: mirrim runs with word-matching memory meanwhile.
+semantic_state="word matching (enable: $BIN_DIR/mirrim embeddings install, then mirrim restart)"
+if [ "$SEMANTIC" = 1 ]; then
+  say "Installing the semantic memory model (34 MB, verified by SHA-256)..."
+  detail "Into: $MODELS_DIR/bge-small-en-v1.5"
+  if (cd "$DATA_DIR" && "$APP_DIR/mirrim" embeddings install); then
+    rm -f "$SEMANTIC_DECLINED_MARKER"
+    semantic_state="meaning (in-process model bge-small-en-v1.5)"
+    # Installs before this release seeded Embeddings__Provider=Hashing, which pins word
+    # matching and would leave the model unused. You just chose semantic memory, so let
+    # mirrim pick the best backend at startup instead.
+    if [ "$(env_get "$DATA_DIR/.env" "Embeddings__Provider")" = "Hashing" ]; then
+      env_set "$DATA_DIR/.env" "Embeddings__Provider" "Auto"
+      detail "Embeddings__Provider: Hashing -> Auto, so mirrim uses the model (set it back with mirrim config set)."
+    fi
+  else
+    warn "The semantic memory model was not installed; mirrim works meanwhile with word matching."
+    warn "Retry any time with:  mirrim embeddings install   then:  mirrim restart"
+  fi
+elif [ "$rid" != "osx-x64" ]; then
+  mkdir -p "$MODELS_DIR"
+  : > "$SEMANTIC_DECLINED_MARKER"
+  detail "Semantic memory model skipped. Add it later with: mirrim embeddings install"
+else
+  semantic_state="word matching (Intel Mac: serve 'nomic-embed-text' with Ollama for meaning)"
 fi
 
 # --- Register the service ----------------------------------------------------
@@ -534,6 +609,7 @@ detail "Version:  $version"
 detail "App:      $APP_DIR"
 detail "Data:     $DATA_DIR  (.env, agent.db, logs - kept across upgrades)"
 detail "CLI:      $BIN_DIR/mirrim -> $APP_DIR/mirrim   (and 'otto' as an alias for one more release)"
+detail "Memory:   search by $semantic_state"
 if [ "$EXPOSE_LAN" = 1 ]; then
   detail "Console:  http://localhost:$PORT  +  http://${lan_ip:-<this-machine>}:$PORT (local network)"
   if [ -n "$console_token" ]; then
